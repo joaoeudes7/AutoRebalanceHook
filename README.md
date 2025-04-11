@@ -1,100 +1,94 @@
-# v4-template
-### **A template for writing Uniswap v4 Hooks 🦄**
+# Auto-Rebalance Hook for Uniswap V4
 
-[`Use this Template`](https://github.com/uniswapfoundation/v4-template/generate)
+A secure, MEV-resistant liquidity management hook for Uniswap V4 that automatically rebalances positions as prices move and reinvests collected fees.
 
-1. The example hook [Counter.sol](src/Counter.sol) demonstrates the `beforeSwap()` and `afterSwap()` hooks
-2. The test template [Counter.t.sol](test/Counter.t.sol) preconfigures the v4 pool manager, test tokens, and test liquidity.
+## Key Features
 
-<details>
-<summary>Updating to v4-template:latest</summary>
+### 1. Manipulation-Resistant Rebalancing
 
-This template is actively maintained -- you can update the v4 dependencies, scripts, and helpers: 
-```bash
-git remote add template https://github.com/uniswapfoundation/v4-template
-git fetch template
-git merge template/main <BRANCH> --allow-unrelated-histories
+This implementation adds robust protection against price manipulation attacks that could force harmful rebalancing:
+
+- **Time-Weighted Average Price (TWAP) Oracle**: Maintains a circular buffer of price observations to calculate a time-weighted average price, providing protection against short-term price manipulations.
+- **Manipulation Detection**: Detects suspicious price movements by comparing current tick to TWAP, and falls back to the TWAP-based tick for rebalancing decisions when manipulation is detected.
+- **Configurable Parameters**: Customizable TWAP window (30 minutes to 24 hours) and deviation thresholds that can be adjusted by the contract owner.
+
+### 2. Slippage-Protected Swap Functionality
+
+Protection against front-running and sandwich attacks:
+
+- **Deadline Enforcement**: Transactions expire after a user-defined deadline, preventing execution of stale transactions.
+- **Minimum Output Guarantee**: Ensures swaps meet minimum expected output requirements, protecting against adverse price movements.
+- **Adaptive Price Limits**: Uses buffer-enhanced price limits to prevent extreme slippage.
+
+### 3. Enhanced Security Features
+
+- **Role-Based Access Control**: Separation between owner (full control) and guardian (emergency actions only).
+- **Emergency Pause**: Ability to pause all automated rebalancing and critical operations.
+- **Token Recovery**: Owner can recover accidentally sent tokens or ETH.
+
+## Architecture
+
+The contract is organized into modular components:
+
+1. **AutoRebalanceHook.sol**: Main contract implementing Uniswap V4 hooks for rebalancing liquidity.
+2. **OracleLib.sol**: Library for TWAP oracle implementation and manipulation detection.
+3. **SwapUtils.sol**: Library for secure swap execution with MEV protection.
+4. **PositionLib.sol**: Library for tracking and managing liquidity positions.
+5. **TickLib.sol**: Library for tick-related calculations.
+6. **IAutoRebalanceHook.sol**: Interface defining the contract's external API.
+
+## Usage
+
+### Setup and Deployment
+
+1. Deploy the AutoRebalanceHook contract, passing in the Uniswap V4 PoolManager address.
+2. Configure manipulation protection parameters based on your risk tolerance:
+   - `setUseManipulationProtection(true/false)` - Enable/disable protection
+   - `setMaxTickDeviation(value)` - Maximum allowed deviation from TWAP
+   - `setTwapWindow(value)` - TWAP window duration
+
+### MEV-Protected Operations
+
+When executing swaps, use the protected swap function to prevent sandwich attacks:
+
+```solidity
+function protectedSwap(
+    PoolKey calldata key,
+    bool zeroForOne,
+    int256 amountSpecified,
+    uint256 minAmountOut,
+    uint256 deadline
+) external returns (uint256 amountIn, uint256 amountOut);
 ```
 
-</details>
+### Monitoring Manipulation Attempts
 
----
+The contract emits a `PotentialManipulationDetected` event when unusual price movements are detected, enabling off-chain monitoring.
 
-### Check Forge Installation
-*Ensure that you have correctly installed Foundry (Forge) Stable. You can update Foundry by running:*
+## Security Best Practices
 
-```
-foundryup
-```
+1. **Manipulation Detection**: The hook tracks price observations over time to detect and mitigate potential manipulation attempts.
+2. **Safe Parameter Bounds**: All configuration parameters have safety bounds to prevent misconfiguration.
+3. **Access Control**: Critical functions are protected by appropriate access controls.
+4. **Gas Efficiency**: Optimized for gas efficiency while maintaining robust security guarantees.
 
-> *v4-template* appears to be _incompatible_ with Foundry Nightly. See [foundry announcements](https://book.getfoundry.sh/announcements) to revert back to the stable build
+## Acknowledgements
 
+This implementation builds on insights from the following resources:
+- [Uniswap V4 Hooks Documentation](https://github.com/ora-io/awesome-uniswap-hooks)
+- [Sandwich Attack Mitigation Strategies](https://github.com/ora-io/awesome-uniswap-hooks/blob/main/docs/research/sandwich-resistant-hook.md)
+- [Thorns in the Rose: Security Risks in Uniswap v4](https://github.com/ora-io/awesome-uniswap-hooks#articles)
 
+## Overview
 
-## Set up
+The AutoRebalanceHook provides automated management of Uniswap V4 liquidity positions with these key features:
 
-*requires [foundry](https://book.getfoundry.sh)*
+1. **Automatic Rebalancing**: Detects when positions move out of range and repositions liquidity around the current price.
+2. **Fee Collection & Reinvestment**: Periodically collects trading fees and reinvests them back into the position.
+3. **Optimized Token Ratios**: Calculates and maintains optimal token ratios for efficient liquidity provision.
+4. **Configurable Parameters**: Customizable thresholds and intervals for various operations.
 
-```
-forge install
-forge test
-```
+## Configuration Parameters
 
-### Local Development (Anvil)
-
-Other than writing unit tests (recommended!), you can only deploy & test hooks on [anvil](https://book.getfoundry.sh/anvil/)
-
-```bash
-# start anvil, a local EVM chain
-anvil
-
-# in a new terminal
-forge script script/Anvil.s.sol \
-    --rpc-url http://localhost:8545 \
-    --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
-    --broadcast
-```
-
-See [script/](script/) for hook deployment, pool creation, liquidity provision, and swapping.
-
----
-
-<details>
-<summary><h2>Troubleshooting</h2></summary>
-
-
-
-### *Permission Denied*
-
-When installing dependencies with `forge install`, Github may throw a `Permission Denied` error
-
-Typically caused by missing Github SSH keys, and can be resolved by following the steps [here](https://docs.github.com/en/github/authenticating-to-github/connecting-to-github-with-ssh) 
-
-Or [adding the keys to your ssh-agent](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent#adding-your-ssh-key-to-the-ssh-agent), if you have already uploaded SSH keys
-
-### Hook deployment failures
-
-Hook deployment failures are caused by incorrect flags or incorrect salt mining
-
-1. Verify the flags are in agreement:
-    * `getHookCalls()` returns the correct flags
-    * `flags` provided to `HookMiner.find(...)`
-2. Verify salt mining is correct:
-    * In **forge test**: the *deployer* for: `new Hook{salt: salt}(...)` and `HookMiner.find(deployer, ...)` are the same. This will be `address(this)`. If using `vm.prank`, the deployer will be the pranking address
-    * In **forge script**: the deployer must be the CREATE2 Proxy: `0x4e59b44847b379578588920cA78FbF26c0B4956C`
-        * If anvil does not have the CREATE2 deployer, your foundry may be out of date. You can update it with `foundryup`
-
-</details>
-
----
-
-Additional resources:
-
-[Uniswap v4 docs](https://docs.uniswap.org/contracts/v4/overview)
-
-[v4-periphery](https://github.com/uniswap/v4-periphery) contains advanced hook implementations that serve as a great reference
-
-[v4-core](https://github.com/uniswap/v4-core)
-
-[v4-by-example](https://v4-by-example.org)
-
+- `rebalanceThreshold`: Percentage threshold for triggering rebalance (default: 10%)
+- `
