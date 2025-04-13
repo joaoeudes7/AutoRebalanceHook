@@ -7,7 +7,7 @@ import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 
 import {PositionLib} from "./PositionLib.sol";
 import {SwapUtils} from "./SwapUtils.sol";
-import {AutoRebalanceLibrary} from "./AutoRebalanceLibrary.sol";
+import {AutoMoveLibrary} from "./AutoMoveLibrary.sol";
 
 /**
  * @title AutoCompoundLib
@@ -111,7 +111,7 @@ library AutoCompoundLib {
         uint160 sqrtPriceX96
     ) internal returns (uint128 addedLiquidity, uint256 amount0Used, uint256 amount1Used) {
         // Calculate liquidity to add based on available tokens
-        addedLiquidity = AutoRebalanceLibrary.calculateLiquidityForTokens(
+        addedLiquidity = AutoMoveLibrary.calculateLiquidityForTokens(
             amount0,
             amount1,
             position.lowerTick,
@@ -121,7 +121,7 @@ library AutoCompoundLib {
         
         // Only add liquidity if we calculated a valid amount
         if (addedLiquidity > 0) {
-            (amount0Used, amount1Used) = AutoRebalanceLibrary.addLiquidity(
+            (amount0Used, amount1Used) = AutoMoveLibrary.addLiquidity(
                 poolManager,
                 key,
                 position.lowerTick,

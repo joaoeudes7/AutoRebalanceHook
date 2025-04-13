@@ -10,7 +10,7 @@ import {PositionLib} from "./PositionLib.sol";
 import {SwapUtils} from "./SwapUtils.sol";
 import {TickLib} from "./TickLib.sol";
 import {OracleLib} from "./OracleLib.sol";
-import {AutoRebalanceLibrary} from "./AutoRebalanceLibrary.sol";
+import {AutoMoveLibrary} from "./AutoMoveLibrary.sol";
 
 /**
  * @title RebalanceLib
