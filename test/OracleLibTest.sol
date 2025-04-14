@@ -22,15 +22,14 @@ library OracleLibMock {
 // Mock library to skip failing tests that depend on contract implementation details
 // These would normally be tested in integration tests
 contract OracleLibSkippedTests {
-    function checkPriceManipulation(OracleLib.PriceState storage state, int24 currentTick) 
-        internal         pure
-returns (bool) 
+    function checkPriceManipulation(OracleLib.PriceState storage /* state */, int24 /* currentTick */) 
+        internal pure returns (bool) 
     {
         // Mock implementation that always returns false for testing
         return false;
     }
     
-    function recordObservation(OracleLib.PriceState storage state, int24 tick) 
+    function recordObservation(OracleLib.PriceState storage /* state */, int24 /* tick */) 
         internal 
     {
         // Mock implementation that does nothing for testing

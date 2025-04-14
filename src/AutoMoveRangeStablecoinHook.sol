@@ -53,41 +53,39 @@ contract AutoMoveRangeStablecoinHook is AutoMoveRangeHookBase {
     }
     
     /**
-     * @dev Determines if the pool should use stablecoin settings
-     * @param key Pool key
-     * @return True if this is a stablecoin pair
+     * @dev Determine if this hook should use custom config (stablecoin specific settings)
+     * @return True if should use custom settings
      */
     function _shouldUseCustomConfig(PoolKey calldata key) internal view override returns (bool) {
-        address token0 = Currency.unwrap(key.currency0);
-        address token1 = Currency.unwrap(key.currency1);
-        
-        // If both tokens are registered stablecoins, use stablecoin settings
-        return isStablecoin[token0] && isStablecoin[token1];
+        return isStablecoinPair(key);
     }
     
     /**
-     * @dev Returns configuration parameters for stablecoin or standard pairs
-     * @param useCustomConfig Whether to use custom stablecoin configuration
-     * @return tickRange Range of ticks for position
-     * @return rebalanceThreshold Threshold percentage to trigger rebalance
-     * @return cooldownPeriod Time between rebalances
+     * @dev Get configuration parameters for stablecoin pairs
+     * @return tickRange Tick range for stablecoin positions
+     * @return rebalanceThreshold Threshold percentage for stablecoin rebalancing
+     * @return cooldownPeriod Cooldown period between stablecoin rebalances
      */
     function _getConfigForPair(bool useCustomConfig) internal view override returns (
         int24 tickRange,
         uint256 rebalanceThreshold,
         uint256 cooldownPeriod
     ) {
+        // If this is a stablecoin pair, use a narrower range
         if (useCustomConfig) {
-            // Use stablecoin settings
             return (
-                stableTickRange,
+                stableTickRange, 
                 stableRebalanceThreshold,
                 stableCooldownPeriod
             );
-        } else {
-            // Fall back to base implementation for non-stablecoin pairs
-            return super._getConfigForPair(useCustomConfig);
         }
+        
+        // Otherwise use default values from base contract
+        return (
+            defaultTickRange,
+            defaultRebalanceThreshold,
+            defaultCooldownPeriod
+        );
     }
     
     /**
@@ -129,7 +127,7 @@ contract AutoMoveRangeStablecoinHook is AutoMoveRangeHookBase {
      * @dev Collects and compounds fees more aggressively for stablecoin pairs
      */
     function _collectFees(
-        PoolKey calldata key,
+        PoolKey calldata /* key */,
         bytes32 poolId,
         Position storage position
     ) internal override {
@@ -146,54 +144,114 @@ contract AutoMoveRangeStablecoinHook is AutoMoveRangeHookBase {
     // ========== ADMIN FUNCTIONS ==========
     
     /**
-     * @dev Registers a new stablecoin address
-     * @param stablecoin Address to register
+     * @dev Add a token to the stablecoin list
+     * @param token Token address to add
      */
-    function addStablecoin(address stablecoin) external onlyOwner {
-        require(stablecoin != address(0), "Invalid stablecoin address");
-        isStablecoin[stablecoin] = true;
-        emit StablecoinAdded(stablecoin);
+    function addStablecoin(address token) external onlyOwner {
+        isStablecoin[token] = true;
+        emit StablecoinAdded(token);
     }
     
     /**
-     * @dev Removes a stablecoin from the registry
-     * @param stablecoin Address to remove
+     * @dev Remove a token from the stablecoin list
+     * @param token Token address to remove
      */
-    function removeStablecoin(address stablecoin) external onlyOwner {
-        isStablecoin[stablecoin] = false;
-        emit StablecoinRemoved(stablecoin);
+    function removeStablecoin(address token) external onlyOwner {
+        isStablecoin[token] = false;
+        emit StablecoinRemoved(token);
     }
     
     /**
-     * @dev Updates stablecoin rebalance threshold
-     * @param newThreshold New threshold percentage
+     * @dev Update stablecoin tick range
+     * @param newTickRange New tick range for stablecoin pairs
      */
-    function setStableRebalanceThreshold(uint256 newThreshold) external onlyOwner {
-        require(newThreshold > 0 && newThreshold <= 10, "Invalid threshold for stablecoins");
+    function setStablecoinTickRange(int24 newTickRange) external onlyOwner {
+        require(newTickRange > 0, "Invalid tick range");
+        int24 oldValue = stableTickRange;
+        stableTickRange = newTickRange;
+        emit StableConfigUpdated("stableTickRange", uint256(uint24(oldValue)), uint256(uint24(newTickRange)));
+    }
+    
+    /**
+     * @dev Update stablecoin rebalance threshold
+     * @param newThreshold New rebalance threshold for stablecoin pairs
+     */
+    function setStablecoinRebalanceThreshold(uint256 newThreshold) external onlyOwner {
+        require(newThreshold > 0 && newThreshold <= 20, "Invalid threshold");
         uint256 oldValue = stableRebalanceThreshold;
         stableRebalanceThreshold = newThreshold;
         emit StableConfigUpdated("stableRebalanceThreshold", oldValue, newThreshold);
     }
     
     /**
-     * @dev Updates stablecoin tick range
-     * @param newRange New tick range
+     * @dev Update stablecoin cooldown period
+     * @param newPeriod New cooldown period for stablecoin pairs
      */
-    function setStableTickRange(int24 newRange) external onlyOwner {
-        require(newRange > 0 && newRange <= 100, "Invalid range for stablecoins");
-        int24 oldValue = stableTickRange;
-        stableTickRange = newRange;
-        emit StableConfigUpdated("stableTickRange", uint256(uint24(oldValue)), uint256(uint24(newRange)));
-    }
-    
-    /**
-     * @dev Updates stablecoin cooldown period
-     * @param newPeriod New cooldown period in seconds
-     */
-    function setStableCooldownPeriod(uint256 newPeriod) external onlyOwner {
+    function setStablecoinCooldownPeriod(uint256 newPeriod) external onlyOwner {
         require(newPeriod > 0, "Invalid period");
         uint256 oldValue = stableCooldownPeriod;
         stableCooldownPeriod = newPeriod;
         emit StableConfigUpdated("stableCooldownPeriod", oldValue, newPeriod);
+    }
+    
+    /**
+     * @dev Check if a pair contains a stablecoin
+     * @param key Pool key
+     * @return True if pair has at least one stablecoin
+     */
+    function isStablecoinPair(PoolKey calldata key) public view returns (bool) {
+        address token0 = Currency.unwrap(key.currency0);
+        address token1 = Currency.unwrap(key.currency1);
+        
+        return isStablecoin[token0] || isStablecoin[token1];
+    }
+    
+    /**
+     * @dev Callback after pool initialization
+     */
+    function _afterInitialize(
+        address /* sender */,
+        PoolKey calldata key,
+        uint160 /* sqrtPriceX96 */,
+        int24 tick
+    ) internal override returns (bytes4) {
+        // Check if this is a stablecoin pair and set appropriate configuration
+        bytes32 poolId = keccak256(abi.encode(key.toId()));
+        bool useCustomConfig = _shouldUseCustomConfig(key);
+        
+        if (useCustomConfig) {
+            // Set stablecoin-specific configuration
+            pairConfigs[poolId] = PairConfig({
+                isConfigured: true,
+                isCustomConfig: true,
+                tickRange: stableTickRange,
+                rebalanceThreshold: stableRebalanceThreshold,
+                cooldownPeriod: stableCooldownPeriod
+            });
+            
+            // Calculate initial range based on stablecoin settings
+            (int24 tickLower, int24 tickUpper) = _calculateOptimalRange(
+                tick,
+                key.tickSpacing,
+                stableTickRange
+            );
+            
+            // Setup position
+            positions[poolId] = Position({
+                lowerTick: tickLower,
+                upperTick: tickUpper,
+                liquidity: 0,
+                lastRebalance: block.timestamp,
+                lastFeeCollection: block.timestamp,
+                active: true,
+                isInRange: true,
+                token0Balance: 0,
+                token1Balance: 0
+            });
+            
+            emit RangeReset(poolId, tickLower, tickUpper);
+        }
+        
+        return BaseHook.afterInitialize.selector;
     }
 } 

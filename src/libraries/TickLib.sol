@@ -23,10 +23,16 @@ library TickLib {
         int24 rangeTicks
     ) internal pure returns (int24) {
         // Calculate half of the range to center the position around current tick
-        int24 halfRange = (rangeTicks * tickSpacing) / 2;
+        int24 halfRange;
+        unchecked {
+            halfRange = (rangeTicks * tickSpacing) / 2;
+        }
         
         // Calculate tick lower by subtracting half of the range
-        int24 rawTickLower = currentTick - halfRange;
+        int24 rawTickLower;
+        unchecked {
+            rawTickLower = currentTick - halfRange;
+        }
         
         // Ensure tick is multiple of spacing
         int24 tickLower = (rawTickLower / tickSpacing) * tickSpacing;
@@ -52,10 +58,16 @@ library TickLib {
         int24 rangeTicks
     ) internal pure returns (int24) {
         // Calculate half of the range to center the position around current tick
-        int24 halfRange = (rangeTicks * tickSpacing) / 2;
+        int24 halfRange;
+        unchecked {
+            halfRange = (rangeTicks * tickSpacing) / 2;
+        }
         
         // Calculate tick upper by adding half of the range
-        int24 rawTickUpper = currentTick + halfRange;
+        int24 rawTickUpper;
+        unchecked {
+            rawTickUpper = currentTick + halfRange;
+        }
         
         // Ensure tick is multiple of spacing
         int24 tickUpper = (rawTickUpper / tickSpacing) * tickSpacing;
@@ -93,18 +105,21 @@ library TickLib {
         // For NarrowRange liquidity, we want a very narrow range
         // that's just below the current tick
         // Fix type conversion issues by converting to int24 properly
-        int24 adjustedSpacing = int24(int256(uint256(uint24(tickSpacing)) * rangeMultiplier));
-        int24 tickLower = currentTick - adjustedSpacing;
-        
-        // Align to valid tick
-        tickLower = alignToSpacing(tickLower, tickSpacing);
-        
-        // Ensure tick is not below minimum
-        if (tickLower < MIN_TICK) {
-            tickLower = MIN_TICK;
+        int24 adjustedSpacing;
+        unchecked {
+            adjustedSpacing = int24(int256(uint256(uint24(tickSpacing)) * rangeMultiplier));
+            int24 tickLower = currentTick - adjustedSpacing;
+            
+            // Align to valid tick
+            tickLower = alignToSpacing(tickLower, tickSpacing);
+            
+            // Ensure tick is not below minimum
+            if (tickLower < MIN_TICK) {
+                tickLower = MIN_TICK;
+            }
+            
+            return tickLower;
         }
-        
-        return tickLower;
     }
     
     /**
@@ -122,17 +137,20 @@ library TickLib {
         // For NarrowRange liquidity, we want a very narrow range
         // that's just above the current tick
         // Fix type conversion issues by converting to int24 properly
-        int24 adjustedSpacing = int24(int256(uint256(uint24(tickSpacing)) * rangeMultiplier));
-        int24 tickUpper = currentTick + adjustedSpacing;
-        
-        // Align to valid tick
-        tickUpper = alignToSpacing(tickUpper, tickSpacing);
-        
-        // Ensure tick is not above maximum
-        if (tickUpper > MAX_TICK) {
-            tickUpper = MAX_TICK;
+        int24 adjustedSpacing;
+        unchecked {
+            adjustedSpacing = int24(int256(uint256(uint24(tickSpacing)) * rangeMultiplier));
+            int24 tickUpper = currentTick + adjustedSpacing;
+            
+            // Align to valid tick
+            tickUpper = alignToSpacing(tickUpper, tickSpacing);
+            
+            // Ensure tick is not above maximum
+            if (tickUpper > MAX_TICK) {
+                tickUpper = MAX_TICK;
+            }
+            
+            return tickUpper;
         }
-        
-        return tickUpper;
     }
 } 

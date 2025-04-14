@@ -195,7 +195,7 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
         PoolKey calldata key,
         uint160,
         int24 tick
-    ) internal override returns (bytes4) {
+    ) internal virtual override returns (bytes4) {
         bytes32 poolId = keccak256(abi.encode(key.toId()));
         
         // Determine if custom configuration should be used, can be overridden by child contracts
@@ -252,9 +252,9 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
      * @dev Callback before adding liquidity
      */
     function _beforeAddLiquidity(
-        address,
-        PoolKey calldata key,
-        IPoolManager.ModifyLiquidityParams calldata params,
+        address /* sender */,
+        PoolKey calldata /* key */,
+        IPoolManager.ModifyLiquidityParams calldata /* params */,
         bytes calldata
     ) internal virtual override returns (bytes4) {
         // Allow custom behavior in derived contracts
@@ -265,11 +265,11 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
      * @dev Callback after adding liquidity
      */
     function _afterAddLiquidity(
-        address,
+        address /* sender */,
         PoolKey calldata key,
         IPoolManager.ModifyLiquidityParams calldata params,
-        BalanceDelta,
-        BalanceDelta,
+        BalanceDelta /* delta */,
+        BalanceDelta /* feeDelta */,
         bytes calldata
     ) internal virtual override returns (bytes4, BalanceDelta) {
         if (params.liquidityDelta > 0) {
@@ -296,7 +296,7 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
      * @dev Callback before removing liquidity
      */
     function _beforeRemoveLiquidity(
-        address,
+        address /* sender */,
         PoolKey calldata key,
         IPoolManager.ModifyLiquidityParams calldata params,
         bytes calldata
@@ -371,22 +371,20 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
     
     /**
      * @dev Determines if a custom configuration should be used for a pool
-     * @param key The pool key
      * @return True if custom configuration should be used
      */
-    function _shouldUseCustomConfig(PoolKey calldata key) internal virtual returns (bool) {
+    function _shouldUseCustomConfig(PoolKey calldata /* key */) internal virtual returns (bool) {
         // Override in derived contracts to implement specific logic
         return false;
     }
     
     /**
      * @dev Returns configuration parameters based on pair type
-     * @param useCustomConfig Whether to use custom configuration
      * @return tickRange Tick range for the position
      * @return rebalanceThreshold Threshold percentage for rebalancing
      * @return cooldownPeriod Cooldown period between rebalances
      */
-    function _getConfigForPair(bool useCustomConfig) internal virtual view returns (
+    function _getConfigForPair(bool /* useCustomConfig */) internal virtual view returns (
         int24 tickRange,
         uint256 rebalanceThreshold,
         uint256 cooldownPeriod
@@ -423,7 +421,7 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
     function _updateMetrics(
         bytes32 poolId,
         int256 amountSpecified,
-        BalanceDelta delta,
+        BalanceDelta /* delta */,
         int24 currentTick
     ) internal virtual {
         PoolMetrics storage metrics = poolMetrics[poolId];
@@ -542,7 +540,7 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
      * @dev Determines if fees should be collected
      */
     function _shouldCollectFees(
-        bytes32 poolId,
+        bytes32 /* poolId */,
         Position storage position
     ) internal view returns (bool) {
         return position.active && (block.timestamp >= position.lastFeeCollection + feeCollectionInterval);

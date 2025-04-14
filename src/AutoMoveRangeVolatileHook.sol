@@ -25,7 +25,7 @@ contract AutoMoveRangeVolatileHook is AutoMoveRangeHookBase {
     
     // Volatility tracking
     uint256 public averageVolatility24h;              // Average volatility over 24h in basis points
-    uint256 public volatilityMultiplier = 150;        // 1.5x, adjusts range based on volatility
+    uint32 public volatilityMultiplier = 150;        // 1.5x, adjusts range based on volatility
     uint256 public lastVolatilityUpdate;              // Last time volatility was updated
     
     // List of known volatile tokens
@@ -59,78 +59,89 @@ contract AutoMoveRangeVolatileHook is AutoMoveRangeHookBase {
     }
     
     /**
-     * @dev Determines if the pool should use volatile settings
-     * @param key Pool key
-     * @return True if this is a volatile pair
+     * @dev Determine if this hook should use custom config for volatile pairs
+     * @return True if should use custom volatile settings
      */
     function _shouldUseCustomConfig(PoolKey calldata key) internal view override returns (bool) {
-        address token0 = Currency.unwrap(key.currency0);
-        address token1 = Currency.unwrap(key.currency1);
-        
-        // If either token is registered as volatile, use volatile settings
-        return isVolatileToken[token0] || isVolatileToken[token1];
+        return isVolatilePair(key);
     }
     
     /**
-     * @dev Returns configuration parameters for volatile or standard pairs
-     * @param useCustomConfig Whether to use custom volatile configuration
-     * @return tickRange Range of ticks for position
-     * @return rebalanceThreshold Threshold percentage to trigger rebalance
-     * @return cooldownPeriod Time between rebalances
+     * @dev Returns configuration parameters for volatile pairs
+     * @return tickRange Tick range for the position
+     * @return rebalanceThreshold Threshold percentage for rebalancing
+     * @return cooldownPeriod Cooldown period between rebalances
      */
     function _getConfigForPair(bool useCustomConfig) internal view override returns (
         int24 tickRange,
         uint256 rebalanceThreshold,
         uint256 cooldownPeriod
     ) {
+        // For volatile pairs, use wider ranges with higher thresholds
         if (useCustomConfig) {
-            // Use volatile settings
             return (
-                volatileTickRange,
+                volatileTickRange, 
                 volatileRebalanceThreshold,
                 volatileCooldownPeriod
             );
-        } else {
-            // Fall back to base implementation for non-volatile pairs
-            return super._getConfigForPair(useCustomConfig);
         }
+        
+        // Otherwise use default values from base contract
+        return (
+            defaultTickRange,
+            defaultRebalanceThreshold,
+            defaultCooldownPeriod
+        );
     }
     
     /**
-     * @dev Updates metrics with additional volatility tracking
+     * @dev Updates metrics after a swap for volatile pairs
      */
     function _updateMetrics(
         bytes32 poolId,
         int256 amountSpecified,
-        BalanceDelta delta,
+        BalanceDelta /* delta */,
         int24 currentTick
     ) internal override {
-        // Call base implementation first
-        super._updateMetrics(poolId, amountSpecified, delta, currentTick);
+        // First, update basic metrics through parent implementation
+        super._updateMetrics(poolId, amountSpecified, BalanceDelta.wrap(0), currentTick);
         
-        // Access price state
+        // Now, update volatile-specific metrics
+        PoolMetrics storage metrics = poolMetrics[poolId];
+        
+        // Get volatility factor from price state
         PriceState storage priceState = priceStates[poolId];
         
-        // Update volatility tracking
-        if (priceState.volatilityBasisPoints > 0) {
-            // Exponential moving average for 24h volatility
-            if (averageVolatility24h == 0) {
-                averageVolatility24h = priceState.volatilityBasisPoints;
-            } else {
-                // Simple EMA calculation
-                averageVolatility24h = (averageVolatility24h * 9 + priceState.volatilityBasisPoints * 1) / 10;
-            }
-            
-            lastVolatilityUpdate = block.timestamp;
-            emit VolatilityUpdated(
-                priceState.volatilityBasisPoints, 
-                averageVolatility24h
-            );
-        }
+        // Update metric for range calculation
+        metrics.volatility24h = calculateAdjustedVolatility(
+            priceState.volatilityBasisPoints, 
+            uint256(volatilityMultiplier)  // Cast to uint256 for the calculation
+        );
     }
     
     /**
-     * @dev Executes rebalance logic with volatility-aware range determination
+     * @dev Calculate adjusted volatility based on raw volatility and multiplier
+     * @param rawVolatility Raw volatility in basis points
+     * @param multiplier Multiplier to adjust volatility
+     * @return Adjusted volatility
+     */
+    function calculateAdjustedVolatility(
+        uint32 rawVolatility, 
+        uint256 multiplier  // Changed to uint256 to match calling type
+    ) internal pure returns (uint256) {
+        // Apply multiplier and ensure we don't exceed reasonable values
+        uint256 adjusted = (uint256(rawVolatility) * multiplier) / 100;
+        
+        // Cap at a reasonable maximum
+        if (adjusted > 5000) {
+            adjusted = 5000; // 50% as maximum
+        }
+        
+        return adjusted;
+    }
+    
+    /**
+     * @dev Executes rebalance logic with volatility-aware range
      */
     function _executeRebalance(
         PoolKey calldata key,
@@ -138,66 +149,63 @@ contract AutoMoveRangeVolatileHook is AutoMoveRangeHookBase {
         Position storage position,
         int24 currentTick
     ) internal override {
-        // Check if it's a volatile pair
-        bool isVolatilePair = _shouldUseCustomConfig(key);
+        // Get volatility metrics for this pool
+        PairConfig storage config = pairConfigs[poolId];
+        PoolMetrics storage metrics = poolMetrics[poolId];
         
-        // For volatile pairs, use volatility-aware range calculation
-        if (isVolatilePair) {
-            PairConfig storage config = pairConfigs[poolId];
-            
-            // Calculate base range
-            int24 baseRange = config.tickRange;
-            
-            // Adjust range based on volatility
-            int24 adjustedRange = baseRange;
-            if (averageVolatility24h > 0) {
-                // If volatility is high, widen the range
-                uint256 volatilityAdjustment = (averageVolatility24h * volatilityMultiplier) / 100;
-                adjustedRange = int24(int256((uint256(uint24(baseRange)) * volatilityAdjustment) / 100));
-                
-                // Ensure range isn't too wide
-                if (adjustedRange > 500) adjustedRange = 500;
-                
-                // Ensure range isn't too narrow
-                if (adjustedRange < baseRange) adjustedRange = baseRange;
-            }
-            
-            // Calculate new range with the adjusted range
-            int24 tickLower = TickLib.calculateLowerTick(currentTick, key.tickSpacing, adjustedRange);
-            int24 tickUpper = TickLib.calculateUpperTick(currentTick, key.tickSpacing, adjustedRange);
-            
-            // For highly volatile pairs, add a slight bias in the direction of the trend
-            PriceState storage priceState = priceStates[poolId];
-            if (priceState.initialized && priceState.averageTick != 0) {
-                // Check if there's a trend
-                int24 trend = currentTick - priceState.averageTick;
-                if (trend > 10) {
-                    // Upward trend - skew range upward
-                    tickLower += int24(int256(uint256(trend > 0 ? uint24(trend) : 0) / 4));
-                    tickUpper += int24(int256(uint256(trend > 0 ? uint24(trend) : 0) / 2));
-                } else if (trend < -10) {
-                    // Downward trend - skew range downward
-                    tickLower += int24(int256(trend) / 2);
-                    tickUpper += int24(int256(trend) / 4);
-                }
-                
-                // Align to tick spacing
-                tickLower = TickLib.alignToSpacing(tickLower, key.tickSpacing);
-                tickUpper = TickLib.alignToSpacing(tickUpper, key.tickSpacing);
-            }
-            
-            // Update position
-            position.lowerTick = tickLower;
-            position.upperTick = tickUpper;
-            position.lastRebalance = block.timestamp;
-            position.isInRange = true;
-            
-            // Emit event
-            emit RangeReset(poolId, tickLower, tickUpper);
+        // Determine range based on volatility
+        int24 rangeToUse = calculateDynamicRangeBasedOnVolatility(
+            config.tickRange,
+            metrics.volatility24h
+        );
+        
+        // Calculate new optimal range with volatility factor applied
+        (int24 newLowerTick, int24 newUpperTick) = _calculateOptimalRange(
+            currentTick,
+            key.tickSpacing,
+            rangeToUse
+        );
+        
+        // Update position
+        position.lowerTick = newLowerTick;
+        position.upperTick = newUpperTick;
+        position.lastRebalance = block.timestamp;
+        position.isInRange = true;
+        
+        // Emit range reset event
+        emit RangeReset(poolId, newLowerTick, newUpperTick);
+    }
+    
+    /**
+     * @dev Calculate dynamic range based on observed volatility
+     * @param baseRange Base range width
+     * @param volatility24h 24h volatility in basis points
+     * @return Dynamic range width
+     */
+    function calculateDynamicRangeBasedOnVolatility(
+        int24 baseRange,
+        uint256 volatility24h
+    ) internal pure returns (int24) {
+        // Calculate dynamic range factor based on volatility
+        uint256 rangeFactor;
+        
+        // Scale the range based on volatility
+        // At 0 volatility, use the base range
+        // At high volatility, expand the range
+        if (volatility24h <= 500) {
+            // Low volatility: 1x to 1.5x of base range
+            rangeFactor = 100 + (volatility24h * 100 / 500);
+        } else if (volatility24h <= 2000) {
+            // Medium volatility: 1.5x to 3x of base range
+            rangeFactor = 150 + ((volatility24h - 500) * 150 / 1500);
         } else {
-            // For non-volatile pairs, use the base implementation
-            super._executeRebalance(key, poolId, position, currentTick);
+            // High volatility: 3x to 5x of base range
+            rangeFactor = 300 + ((volatility24h - 2000) * 200 / 3000);
+            if (rangeFactor > 500) rangeFactor = 500; // Cap at 5x
         }
+        
+        // Apply the factor to the base range
+        return int24((int256(baseRange) * int256(rangeFactor)) / 100);
     }
     
     /**
@@ -212,9 +220,9 @@ contract AutoMoveRangeVolatileHook is AutoMoveRangeHookBase {
         position.lastFeeCollection = block.timestamp;
         
         // For volatile pairs, possibly reinvest in a more conservative range
-        bool isVolatilePair = _shouldUseCustomConfig(key);
+        bool isVolatile = _shouldUseCustomConfig(key);
         
-        if (isVolatilePair) {
+        if (isVolatile) {
             // For volatile pairs, we might want to adjust how fees are reinvested
             // based on current market conditions
             // Implementation details would depend on V4 fee handling
@@ -234,18 +242,17 @@ contract AutoMoveRangeVolatileHook is AutoMoveRangeHookBase {
     // ========== ADMIN FUNCTIONS ==========
     
     /**
-     * @dev Registers a new volatile token address
-     * @param token Address to register
+     * @dev Add a token to the volatile token list
+     * @param token Token address to add
      */
     function addVolatileToken(address token) external onlyOwner {
-        require(token != address(0), "Invalid token address");
         isVolatileToken[token] = true;
         emit VolatileTokenAdded(token);
     }
     
     /**
-     * @dev Removes a token from the volatile registry
-     * @param token Address to remove
+     * @dev Remove a token from the volatile token list
+     * @param token Token address to remove
      */
     function removeVolatileToken(address token) external onlyOwner {
         isVolatileToken[token] = false;
@@ -253,46 +260,58 @@ contract AutoMoveRangeVolatileHook is AutoMoveRangeHookBase {
     }
     
     /**
-     * @dev Updates volatile rebalance threshold
-     * @param newThreshold New threshold percentage
+     * @dev Update volatile tick range
+     * @param newTickRange New tick range for volatile pairs
+     */
+    function setVolatileTickRange(int24 newTickRange) external onlyOwner {
+        require(newTickRange > 0, "Invalid tick range");
+        int24 oldValue = volatileTickRange;
+        volatileTickRange = newTickRange;
+        emit ConfigUpdated("volatileTickRange", uint256(uint24(oldValue)), uint256(uint24(newTickRange)));
+    }
+    
+    /**
+     * @dev Update volatile rebalance threshold
+     * @param newThreshold New rebalance threshold for volatile pairs
      */
     function setVolatileRebalanceThreshold(uint256 newThreshold) external onlyOwner {
-        require(newThreshold > 0 && newThreshold <= 30, "Invalid threshold for volatile pairs");
+        require(newThreshold > 0 && newThreshold <= 50, "Invalid threshold");
         uint256 oldValue = volatileRebalanceThreshold;
         volatileRebalanceThreshold = newThreshold;
-        emit VolatileConfigUpdated("volatileRebalanceThreshold", oldValue, newThreshold);
+        emit ConfigUpdated("volatileRebalanceThreshold", oldValue, newThreshold);
     }
     
     /**
-     * @dev Updates volatile tick range
-     * @param newRange New tick range
-     */
-    function setVolatileTickRange(int24 newRange) external onlyOwner {
-        require(newRange > 50 && newRange <= 1000, "Invalid range for volatile pairs");
-        int24 oldValue = volatileTickRange;
-        volatileTickRange = newRange;
-        emit VolatileConfigUpdated("volatileTickRange", uint256(uint24(oldValue)), uint256(uint24(newRange)));
-    }
-    
-    /**
-     * @dev Updates volatile cooldown period
-     * @param newPeriod New cooldown period in seconds
+     * @dev Update volatile cooldown period
+     * @param newPeriod New cooldown period for volatile pairs
      */
     function setVolatileCooldownPeriod(uint256 newPeriod) external onlyOwner {
         require(newPeriod > 0, "Invalid period");
         uint256 oldValue = volatileCooldownPeriod;
         volatileCooldownPeriod = newPeriod;
-        emit VolatileConfigUpdated("volatileCooldownPeriod", oldValue, newPeriod);
+        emit ConfigUpdated("volatileCooldownPeriod", oldValue, newPeriod);
     }
     
     /**
-     * @dev Updates volatility multiplier
-     * @param newMultiplier New multiplier (basis points)
+     * @dev Update volatility multiplier
+     * @param newMultiplier New volatility multiplier
      */
-    function setVolatilityMultiplier(uint256 newMultiplier) external onlyOwner {
-        require(newMultiplier >= 100 && newMultiplier <= 500, "Invalid multiplier (100-500%)");
-        uint256 oldValue = volatilityMultiplier;
+    function setVolatilityMultiplier(uint32 newMultiplier) external onlyOwner {
+        require(newMultiplier >= 50 && newMultiplier <= 200, "Invalid multiplier");
+        uint32 oldValue = volatilityMultiplier;
         volatilityMultiplier = newMultiplier;
-        emit VolatileConfigUpdated("volatilityMultiplier", oldValue, newMultiplier);
+        emit ConfigUpdated("volatilityMultiplier", uint256(oldValue), uint256(newMultiplier));
+    }
+    
+    /**
+     * @dev Check if a pair is considered volatile (contains at least one volatile token)
+     * @param key Pool key
+     * @return True if pair is volatile
+     */
+    function isVolatilePair(PoolKey calldata key) public view returns (bool) {
+        address token0 = Currency.unwrap(key.currency0);
+        address token1 = Currency.unwrap(key.currency1);
+        
+        return isVolatileToken[token0] || isVolatileToken[token1];
     }
 } 

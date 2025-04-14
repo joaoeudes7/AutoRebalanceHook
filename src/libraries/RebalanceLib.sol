@@ -104,24 +104,33 @@ library RebalanceLib {
         int24 currentTick,
         uint256 rebalanceThreshold
     ) internal pure returns (bool shouldRebalance) {
+        // Quick return if position is inactive
         if (!position.isActive) return false;
         
-        // Calculate distance from current tick to position boundaries as percentage
-        uint256 distanceToLower = uint24(currentTick - position.lowerTick);
-        uint256 distanceToUpper = uint24(position.upperTick - currentTick);
-        uint256 totalRange = uint24(position.upperTick - position.lowerTick);
-        
-        // If position is out of range, definitely needs rebalancing
+        // Quick return if out of range (definitely needs rebalancing)
         if (currentTick <= position.lowerTick || currentTick >= position.upperTick) {
             return true;
         }
         
+        // Calculate distance from current tick to position boundaries as percentage
+        uint256 distanceToLower;
+        uint256 distanceToUpper;
+        uint256 totalRange;
+        
+        unchecked {
+            distanceToLower = uint24(currentTick - position.lowerTick);
+            distanceToUpper = uint24(position.upperTick - currentTick);
+            totalRange = uint24(position.upperTick - position.lowerTick);
+        }
+        
         // Calculate how far we are from center as a percentage
-        uint256 centerDeviation = 0;
-        if (distanceToLower > distanceToUpper) {
-            centerDeviation = ((distanceToLower - distanceToUpper) * 100) / totalRange;
-        } else {
-            centerDeviation = ((distanceToUpper - distanceToLower) * 100) / totalRange;
+        uint256 centerDeviation;
+        unchecked {
+            if (distanceToLower > distanceToUpper) {
+                centerDeviation = ((distanceToLower - distanceToUpper) * 100) / totalRange;
+            } else {
+                centerDeviation = ((distanceToUpper - distanceToLower) * 100) / totalRange;
+            }
         }
         
         return centerDeviation >= rebalanceThreshold;
@@ -155,6 +164,9 @@ library RebalanceLib {
         }
     }
 
+    /**
+     * @dev Get the current tick safely, with manipulation protection if enabled
+     */
     function getCurrentTick(
         PoolKey calldata /* key */,
         PositionLib.Position memory position,
