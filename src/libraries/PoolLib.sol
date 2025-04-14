@@ -19,6 +19,7 @@ library PoolLib {
      */
     function getCurrentTick(IPoolManager poolManager, PoolKey memory key) internal view returns (int24 tick) {
         // Get the current slot0 data from the pool using StateLibrary
+        // Ignoring other return values from getSlot0
         (, tick,,) = StateLibrary.getSlot0(poolManager, key.toId());
         return tick;
     }
@@ -31,6 +32,7 @@ library PoolLib {
      */
     function getSqrtPriceX96(IPoolManager poolManager, PoolKey memory key) internal view returns (uint160 sqrtPriceX96) {
         // Get the current slot0 data from the pool using StateLibrary
+        // Ignoring other return values from getSlot0
         (sqrtPriceX96,,,) = StateLibrary.getSlot0(poolManager, key.toId());
         return sqrtPriceX96;
     }

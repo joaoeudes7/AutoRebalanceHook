@@ -60,6 +60,7 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
     // ========== DATA STRUCTURES ==========
     // Custom price state structure for manipulation detection
     struct PriceState {
+        // Pack these fields together in one storage slot (32 + 56 + 8 + 24 + 32 = 152 bits)
         uint32 lastObservationTime;
         int56 tickCumulative;
         bool initialized;
@@ -88,28 +89,40 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
     
     // Position tracking
     struct Position {
+        // Slot 1: 24 + 24 + 128 = 176 bits
         int24 lowerTick;
         int24 upperTick;
         uint128 liquidity;
-        uint256 lastRebalance;
-        uint256 lastFeeCollection;
+        
+        // Slot 2: 8 + 8 + 240 = 256 bits
         bool active;
         bool isInRange;
+        uint240 __padding; // padding to ensure slot alignment
+        
+        // Slot 3 & 4 & 5: Each uses a full 256-bit slot
+        uint256 lastRebalance;
+        uint256 lastFeeCollection;
         uint256 token0Balance;
+        
+        // Slot 6: full 256-bit slot
         uint256 token1Balance;
     }
     
     // Pool configuration
     struct PairConfig {
-        bool isConfigured;
-        bool isCustomConfig;
+        // Slot 1: 8 + 24 + 224 = 256 bits
+        uint8 flags;      // Bit 0: isConfigured, Bit 1: isCustomConfig
         int24 tickRange;
+        uint224 __padding; // padding to ensure slot alignment
+        
+        // Slot 2 & 3: Each uses a full 256-bit slot
         uint256 rebalanceThreshold;
         uint256 cooldownPeriod;
     }
     
     // Pool metrics for analytics
     struct PoolMetrics {
+        // Each field uses a full 256-bit slot due to their sizes
         uint256 lastUpdateTime;   // Last time metrics were updated
         uint256 volumeLast24h;    // Volume in last 24 hours
         uint256 feesLast24h;      // Fees in last 24 hours
@@ -117,6 +130,10 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
         uint256 avgGasPrice;      // Last known gas price in gwei
         int24 lastTick;           // Last known tick
     }
+    
+    // Flag constants for PairConfig
+    uint8 private constant FLAG_CONFIGURED = 1;  // 0000 0001
+    uint8 private constant FLAG_CUSTOM_CONFIG = 2; // 0000 0010
     
     // State mappings
     mapping(bytes32 => Position) public positions;
@@ -206,9 +223,9 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
         
         // Set up pair configuration
         pairConfigs[poolId] = PairConfig({
-            isConfigured: true,
-            isCustomConfig: useCustomConfig,
+            flags: useCustomConfig ? (FLAG_CONFIGURED | FLAG_CUSTOM_CONFIG) : FLAG_CONFIGURED,
             tickRange: rangeToUse,
+            __padding: 0,
             rebalanceThreshold: rebalanceThreshold,
             cooldownPeriod: cooldownPeriod
         });
@@ -225,10 +242,11 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
             lowerTick: tickLower,
             upperTick: tickUpper,
             liquidity: 0,
-            lastRebalance: block.timestamp,
-            lastFeeCollection: block.timestamp,
             active: true,
             isInRange: true,
+            __padding: 0,
+            lastRebalance: block.timestamp,
+            lastFeeCollection: block.timestamp,
             token0Balance: 0,
             token1Balance: 0
         });
@@ -767,24 +785,19 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
     // ========== MANUAL OPERATIONS ==========
     
     /**
-     * @dev Manually triggers position rebalancing
-     * @param key Pool key
+     * @dev Allows authorized users to manually trigger rebalancing
      */
     function manuallyRebalance(PoolKey calldata key) external onlyAuthorized whenNotPaused {
         bytes32 poolId = keccak256(abi.encode(key.toId()));
-        Position storage position = positions[poolId];
         
-        // Ensure position is active
+        // Check if pool is configured
+        require(_isPoolConfigured(poolId), "Pool not configured");
+        
+        Position storage position = positions[poolId];
         require(position.active, "Position not active");
         
-        // Get current tick - using correct interface method
-        int24 currentTick;
-        {
-            // Note: Accessing the current tick through poolManager
-            // Different implementations of IPoolManager might have different methods to access this information
-            // Use whatever method is available in your implementation
-            currentTick = PoolLib.getCurrentTick(poolManager, key);
-        }
+        // Get current tick from pool
+        int24 currentTick = PoolLib.getCurrentTick(poolManager, key);
         
         // Execute rebalance
         _executeRebalance(key, poolId, position, currentTick);
@@ -796,6 +809,10 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
      */
     function manuallyCollectFees(PoolKey calldata key) external onlyAuthorized whenNotPaused {
         bytes32 poolId = keccak256(abi.encode(key.toId()));
+        
+        // Check if pool is configured
+        require(_isPoolConfigured(poolId), "Pool not configured");
+        
         Position storage position = positions[poolId];
         
         // Ensure position is active
@@ -805,7 +822,13 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
         _collectFees(key, poolId, position);
     }
 
-    // Replace JITRebalanceExecuted event with NarrowRangeRebalanceExecuted
+    /**
+     * @dev Execute narrow range rebalance for maximum capital efficiency (internal version)
+     * @param key Pool key
+     * @param poolId The pool ID
+     * @param position Position storage reference
+     * @param currentTick Current tick from the pool
+     */
     function _executeNarrowRangeRebalance(
         PoolKey calldata key,
         bytes32 poolId,
@@ -837,7 +860,7 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
         }
         
         // Calculate new liquidity with collected tokens
-        uint128 newLiquidity = _calculateOptimalLiquidity(
+        uint128 newLiquidity = calculateOptimalLiquidity(
             currentTick,
             tickLower,
             tickUpper,
@@ -874,52 +897,76 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
         }
     }
 
-    // Helper function to calculate optimal liquidity for the given range and token balances
-    function _calculateOptimalLiquidity(
+    /**
+     * @dev Testable version of executeNarrowRangeRebalance that doesn't require storage
+     * @param key Pool key
+     * @param currentTick Current tick from the pool
+     * @param amount0 Current amount of token0 
+     * @param amount1 Current amount of token1
+     * @return tickLower New lower tick
+     * @return tickUpper New upper tick
+     * @return liquidity New liquidity amount
+     */
+    function executeNarrowRangeRebalanceTest(
+        PoolKey calldata key,
+        int24 currentTick,
+        int24 /* currentLowerTick */,
+        int24 /* currentUpperTick */,
+        uint128 /* currentLiquidity */,
+        uint256 amount0,
+        uint256 amount1
+    ) public pure returns (
+        int24 tickLower,
+        int24 tickUpper,
+        uint128 liquidity
+    ) {
+        // Calculate narrow concentrated range around the current price
+        tickLower = TickLib.calculateNarrowLowerTick(currentTick, key.tickSpacing, 1);
+        tickUpper = TickLib.calculateNarrowUpperTick(currentTick, key.tickSpacing, 1);
+        
+        // Calculate optimal liquidity
+        liquidity = calculateOptimalLiquidity(
+            currentTick,
+            tickLower,
+            tickUpper,
+            amount0,
+            amount1
+        );
+        
+        return (tickLower, tickUpper, liquidity);
+    }
+
+    /**
+     * @dev Calculate optimal liquidity amount for the given range and token balances
+     * @param currentTick Current tick
+     * @param tickLower Lower tick of the range
+     * @param tickUpper Upper tick of the range
+     * @param amount0 Amount of token0 available
+     * @param amount1 Amount of token1 available
+     * @return liquidity Amount of liquidity that can be added
+     */
+    function calculateOptimalLiquidity(
         int24 currentTick,
         int24 tickLower,
         int24 tickUpper,
         uint256 amount0,
         uint256 amount1
-    ) internal pure returns (uint128) {
+    ) public pure returns (uint128) {
         // Get sqrt prices at the ticks
         uint160 sqrtPriceX96 = TickMath.getSqrtPriceAtTick(currentTick);
         uint160 sqrtPriceLowerX96 = TickMath.getSqrtPriceAtTick(tickLower);
         uint160 sqrtPriceUpperX96 = TickMath.getSqrtPriceAtTick(tickUpper);
         
-        // Calculate liquidity amount based on available tokens
-        // This is a simplified calculation - in production,
-        // you should use LiquidityAmounts from v4-periphery
-        
-        uint256 liquidity = 0;
-        if (currentTick < tickLower) {
-            // Current price is below the range
-            // Only token0 is used
-            liquidity = amount0 * (sqrtPriceUpperX96 - sqrtPriceLowerX96) / 
-                       (sqrtPriceLowerX96 * sqrtPriceUpperX96);
-        } else if (currentTick < tickUpper) {
-            // Current price is within the range
-            // Both tokens are used
-            uint256 liquidity0 = amount0 * sqrtPriceX96 / 
-                               (sqrtPriceUpperX96 - sqrtPriceX96);
-            uint256 liquidity1 = amount1 / 
-                               (sqrtPriceX96 - sqrtPriceLowerX96);
-            liquidity = liquidity0 < liquidity1 ? liquidity0 : liquidity1;
-        } else {
-            // Current price is above the range
-            // Only token1 is used
-            liquidity = amount1 / (sqrtPriceUpperX96 - sqrtPriceLowerX96);
-        }
-        
-        // Ensure we're within uint128 range
-        if (liquidity > type(uint128).max) {
-            liquidity = type(uint128).max;
-        }
-        
-        return uint128(liquidity);
+        // Use LiquidityAmounts library to calculate the optimal liquidity
+        return LiquidityAmounts.getLiquidityForAmounts(
+            sqrtPriceX96,
+            sqrtPriceLowerX96,
+            sqrtPriceUpperX96,
+            uint256(amount0),
+            uint256(amount1)
+        );
     }
 
-    // Rename manuallyExecuteJITRebalance to manuallyExecuteNarrowRangeRebalance and update comments
     /**
      * @notice Manually triggers concentrated narrow-range rebalancing
      * @dev Creates a very narrow position around the current price for max capital efficiency
@@ -927,6 +974,10 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
      */
     function manuallyExecuteNarrowRangeRebalance(PoolKey calldata key) external onlyAuthorized whenNotPaused {
         bytes32 poolId = keccak256(abi.encode(key.toId()));
+        
+        // Check if pool is configured
+        require(_isPoolConfigured(poolId), "Pool not configured");
+        
         Position storage position = positions[poolId];
         
         // Ensure position is active
@@ -940,5 +991,49 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
         
         // Emit event
         emit NarrowRangeRebalanceExecuted(poolId, position.lowerTick, position.upperTick);
+    }
+
+    /**
+     * @dev Helper function to check if a pool is configured
+     * @param poolId The pool ID
+     * @return True if the pool is configured
+     */
+    function _isPoolConfigured(bytes32 poolId) internal view returns (bool) {
+        return (pairConfigs[poolId].flags & FLAG_CONFIGURED) != 0;
+    }
+    
+    /**
+     * @dev Helper function to check if a pool uses custom configuration
+     * @param poolId The pool ID
+     * @return True if the pool uses custom configuration
+     */
+    function _usesCustomConfig(bytes32 poolId) internal view returns (bool) {
+        return (pairConfigs[poolId].flags & FLAG_CUSTOM_CONFIG) != 0;
+    }
+    
+    /**
+     * @dev Helper function to set the configured flag
+     * @param poolId The pool ID
+     * @param configured Whether the pool is configured
+     */
+    function _setConfigured(bytes32 poolId, bool configured) internal {
+        if (configured) {
+            pairConfigs[poolId].flags |= FLAG_CONFIGURED;
+        } else {
+            pairConfigs[poolId].flags &= ~FLAG_CONFIGURED;
+        }
+    }
+    
+    /**
+     * @dev Helper function to set the custom config flag
+     * @param poolId The pool ID
+     * @param useCustom Whether to use custom configuration
+     */
+    function _setCustomConfig(bytes32 poolId, bool useCustom) internal {
+        if (useCustom) {
+            pairConfigs[poolId].flags |= FLAG_CUSTOM_CONFIG;
+        } else {
+            pairConfigs[poolId].flags &= ~FLAG_CUSTOM_CONFIG;
+        }
     }
 } 

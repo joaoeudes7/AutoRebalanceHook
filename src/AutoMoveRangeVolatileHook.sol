@@ -18,6 +18,10 @@ import "./libraries/SwapUtils.sol";
  * @dev Optimized for pairs like ETH/BTC, ETH/USDC where price movement is significant
  */
 contract AutoMoveRangeVolatileHook is AutoMoveRangeHookBase {
+    // Flag constants for PairConfig (duplicated from base contract)
+    uint8 private constant FLAG_CONFIGURED = 1;  // 0000 0001
+    uint8 private constant FLAG_CUSTOM_CONFIG = 2; // 0000 0010
+    
     // Volatile-specific configuration
     uint256 public volatileRebalanceThreshold = 15;   // 15% for volatile pairs (less sensitive)
     int24 public volatileTickRange = 200;             // ~2% range (wider)

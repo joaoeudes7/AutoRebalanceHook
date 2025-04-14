@@ -18,6 +18,10 @@ import "./libraries/SwapUtils.sol";
  * @dev Optimized for pairs like USDC/USDT, DAI/USDC, etc. where price movement is minimal
  */
 contract AutoMoveRangeStablecoinHook is AutoMoveRangeHookBase {
+    // Flag constants for PairConfig (duplicated from base contract)
+    uint8 private constant FLAG_CONFIGURED = 1;  // 0000 0001
+    uint8 private constant FLAG_CUSTOM_CONFIG = 2; // 0000 0010
+    
     // Stablecoin-specific configuration
     uint256 public stableRebalanceThreshold = 2;      // 2% for stable pairs (more sensitive)
     int24 public stableTickRange = 20;                // ~0.2% range (narrower)
@@ -222,9 +226,9 @@ contract AutoMoveRangeStablecoinHook is AutoMoveRangeHookBase {
         if (useCustomConfig) {
             // Set stablecoin-specific configuration
             pairConfigs[poolId] = PairConfig({
-                isConfigured: true,
-                isCustomConfig: true,
+                flags: FLAG_CONFIGURED | FLAG_CUSTOM_CONFIG,
                 tickRange: stableTickRange,
+                __padding: 0,
                 rebalanceThreshold: stableRebalanceThreshold,
                 cooldownPeriod: stableCooldownPeriod
             });
@@ -241,10 +245,11 @@ contract AutoMoveRangeStablecoinHook is AutoMoveRangeHookBase {
                 lowerTick: tickLower,
                 upperTick: tickUpper,
                 liquidity: 0,
-                lastRebalance: block.timestamp,
-                lastFeeCollection: block.timestamp,
                 active: true,
                 isInRange: true,
+                __padding: 0,
+                lastRebalance: block.timestamp,
+                lastFeeCollection: block.timestamp,
                 token0Balance: 0,
                 token1Balance: 0
             });
