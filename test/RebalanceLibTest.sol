@@ -267,18 +267,31 @@ contract RebalanceLibTest is Test {
             token1Balance: 0
         });
         
-        // Call the function and check logical invariants
         bool result = RebalanceLib.needsRebalance(position, currentTick, rebalanceThreshold);
         
-        // Check invariants:
-        // 1. If current tick is outside the range, result should be true
-        if (currentTick < lowerTick || currentTick >= upperTick) {
-            assertTrue(result, "Should always need rebalance when out of range");
-        }
-        
-        // 2. If current tick is at exact center, result should be false
-        if (currentTick == (lowerTick + upperTick) / 2 && rebalanceThreshold > 0) {
-            assertFalse(result, "Should not need rebalance at exact center");
+        // Check result matches expected behavior
+        if (currentTick <= lowerTick || currentTick >= upperTick) {
+            // When out of range, should always need rebalance
+            assertTrue(result, "Out of range position should need rebalance");
+        } else {
+            // Calculate distances exactly as the library does
+            uint256 distanceToLower = uint24(currentTick - lowerTick);
+            uint256 distanceToUpper = uint24(upperTick - currentTick);
+            uint256 totalRange = uint24(upperTick - lowerTick);
+            
+            // Calculate deviation percentage
+            uint256 centerDeviation;
+            if (distanceToLower > distanceToUpper) {
+                centerDeviation = ((distanceToLower - distanceToUpper) * 100) / totalRange;
+            } else {
+                centerDeviation = ((distanceToUpper - distanceToLower) * 100) / totalRange;
+            }
+            
+            if (centerDeviation >= rebalanceThreshold) {
+                assertTrue(result, "Position with high deviation should need rebalance");
+            } else {
+                assertFalse(result, "Position close to center should not need rebalance");
+            }
         }
     }
 

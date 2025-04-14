@@ -15,6 +15,7 @@ import {FullMath} from "v4-core/src/libraries/FullMath.sol";
 import {Currency, CurrencyLibrary} from "v4-core/src/types/Currency.sol";
 import {CurrencySettler} from "uniswap-hooks/utils/CurrencySettler.sol";
 import {LiquidityAmounts} from "v4-periphery/src/libraries/LiquidityAmounts.sol";
+import {PoolLib} from "./PoolLib.sol";
 
 /**
  * @title AutoMoveLibrary
@@ -140,28 +141,6 @@ library AutoMoveLibrary {
     }
     
     /**
-     * @dev Simplified implementation of getSqrtRatioAtTick for testing
-     */
-    function getSimplifiedSqrtRatioAtTick(int24 tick) internal pure returns (uint160) {
-        // Use the actual Uniswap V4 implementation
-        return TickMath.getSqrtPriceAtTick(tick);
-    }
-    
-    /**
-     * @dev Check if reinvestment of collected fees is worthwhile
-     * @param feesToken0 Amount of token0 fees collected
-     * @param feesToken1 Amount of token1 fees collected
-     * @return True if reinvestment is worthwhile
-     */
-    function isReinvestmentWorthwhile(
-        uint256 feesToken0,
-        uint256 feesToken1
-    ) internal pure returns (bool) {
-        // This is a simplified check - in production, compare to min threshold
-        return feesToken0 > 0 || feesToken1 > 0;
-    }
-
-    /**
      * @dev Rebalance a position in a gas-efficient way
      * @param poolManager The pool manager contract
      * @param key The pool key
@@ -192,9 +171,10 @@ library AutoMoveLibrary {
             oldLiquidity
         );
         
-        // 2. Calculate liquidity for the new position
-        int24 midTick = (newLowerTick + newUpperTick) / 2;
-        uint160 sqrtPriceX96 = getSimplifiedSqrtRatioAtTick(midTick);
+        // 2. Get the current price from pool to calculate liquidity more accurately
+        uint160 sqrtPriceX96 = PoolLib.getSqrtPriceX96(poolManager, key);
+        
+        // 3. Calculate liquidity for the new position using Uniswap's LiquidityAmounts library
         newLiquidity = calculateLiquidityForTokens(
             amount0Withdrawn,
             amount1Withdrawn,
@@ -203,7 +183,7 @@ library AutoMoveLibrary {
             sqrtPriceX96
         );
         
-        // 3. Add liquidity to the new position
+        // 4. Add liquidity to the new position
         if (newLiquidity > 0) {
             (amount0Used, amount1Used) = addLiquidity(
                 poolManager,
@@ -347,52 +327,6 @@ library AutoMoveLibrary {
         }
         
         return totalDeviation / priceHistory.length;
-    }
-
-    /**
-     * @dev Calculates nearest usable tick
-     * @param tick Target tick
-     * @param tickSpacing Tick spacing
-     * @return result Nearest usable tick
-     */
-    function nearestUsableTick(int24 tick, int24 tickSpacing) internal pure returns (int24 result) {
-        result = int24(divRound(int128(tick), int128(tickSpacing))) * tickSpacing;
-        
-        if (result < TickMath.MIN_TICK) {
-            result += tickSpacing;
-        } else if (result > TickMath.MAX_TICK) {
-            result -= tickSpacing;
-        }
-    }
-
-    /**
-     * @dev Helper for division rounding
-     */
-    function divRound(int128 x, int128 y) internal pure returns (int128 result) {
-        // Check for division by zero
-        require(y != 0, "Division by zero");
-        
-        // Calculate the quotient
-        int128 quot = x / y;
-        
-        // Calculate the result with rounding
-        result = quot;
-        
-        // Only apply rounding logic if y is not 1 (to avoid unnecessary operations)
-        if (y != 1) {
-            // Check remainder for rounding up
-            int128 rem = x % y;
-            
-            // If remainder is at least half the divisor (considering signs), round up
-            if ((rem * 2) >= (y > 0 ? y : -y)) {
-                // Increment or decrement based on the sign of the quotient
-                if (quot >= 0) {
-                    result += 1;
-                } else {
-                    result -= 1;
-                }
-            }
-        }
     }
 
     /**

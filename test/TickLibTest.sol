@@ -218,29 +218,38 @@ contract TickLibTest is Test {
         // Constrain inputs to reasonable values
         currentTick = int24(bound(int256(currentTick), int256(MIN_TICK + 10000), int256(MAX_TICK - 10000)));
         
-        // Constrain tickSpacing to a reasonable range
-        // The key issue was with large tickSpacing values, so we'll limit it more
-        tickSpacing = int24(bound(int256(tickSpacing), int256(1), int256(100)));
+        // Constrain tickSpacing to valid positive values (typical values are 1, 10, 60, 200)
+        tickSpacing = int24(bound(int256(tickSpacing), int256(1), int256(200)));
         
-        // Ensure rangeTicks is at least 2 to ensure a proper range
-        rangeTicks = int24(bound(int256(rangeTicks), int256(2), int256(100)));
+        // Ensure rangeTicks is reasonable (too large values can cause overflow)
+        rangeTicks = int24(bound(int256(rangeTicks), int256(2), int256(50)));
         
-        // Make sure the calculated range won't exceed MIN_TICK/MAX_TICK
-        if (int256(currentTick) - (int256(tickSpacing) * int256(rangeTicks)) / 2 < MIN_TICK ||
-            int256(currentTick) + (int256(tickSpacing) * int256(rangeTicks)) / 2 > MAX_TICK) {
-            // Skip the test for this input combination
+        // Skip test cases where the calculated range might exceed MIN_TICK/MAX_TICK boundaries
+        int256 halfRangeRaw = (int256(tickSpacing) * int256(rangeTicks)) / 2;
+        if (int256(currentTick) - halfRangeRaw < MIN_TICK ||
+            int256(currentTick) + halfRangeRaw > MAX_TICK) {
             return;
         }
         
         int24 lowerTick = TickLib.calculateLowerTick(currentTick, tickSpacing, rangeTicks);
         int24 upperTick = TickLib.calculateUpperTick(currentTick, tickSpacing, rangeTicks);
         
+        // Basic invariants that should always hold
         assertTrue(upperTick > lowerTick, "Upper tick must be greater than lower tick");
         assertTrue(lowerTick >= MIN_TICK, "Lower tick must be >= MIN_TICK");
         assertTrue(upperTick <= MAX_TICK, "Upper tick must be <= MAX_TICK");
         
-        // Check alignment
+        // Check alignment to tick spacing
         assertEq(lowerTick % tickSpacing, 0, "Lower tick must be aligned to tickSpacing");
         assertEq(upperTick % tickSpacing, 0, "Upper tick must be aligned to tickSpacing");
+        
+        // Check that the range is approximately centered around currentTick
+        // Allow some flexibility due to alignment
+        int24 actualCenter = (lowerTick + upperTick) / 2;
+        int24 targetCenter = currentTick;
+        assertTrue(
+            targetCenter - tickSpacing <= actualCenter && actualCenter <= targetCenter + tickSpacing,
+            "Range should be approximately centered around currentTick"
+        );
     }
 } 
