@@ -5,6 +5,7 @@ import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 import {IERC20Minimal} from "v4-core/src/interfaces/external/IERC20Minimal.sol";
+import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 
 import "./AutoMoveRangeHookBase.sol";
 import "./libraries/FeesLib.sol";
@@ -152,7 +153,7 @@ contract AutoMoveRangeVolatileHook is AutoMoveRangeHookBase {
             if (averageVolatility24h > 0) {
                 // If volatility is high, widen the range
                 uint256 volatilityAdjustment = (averageVolatility24h * volatilityMultiplier) / 100;
-                adjustedRange = int24(uint24(baseRange) * volatilityAdjustment / 100);
+                adjustedRange = int24(int256((uint256(uint24(baseRange)) * volatilityAdjustment) / 100));
                 
                 // Ensure range isn't too wide
                 if (adjustedRange > 500) adjustedRange = 500;
@@ -172,12 +173,12 @@ contract AutoMoveRangeVolatileHook is AutoMoveRangeHookBase {
                 int24 trend = currentTick - priceState.averageTick;
                 if (trend > 10) {
                     // Upward trend - skew range upward
-                    tickLower += int24(uint24(trend) / 4);
-                    tickUpper += int24(uint24(trend) / 2);
+                    tickLower += int24(int256(uint256(trend > 0 ? uint24(trend) : 0) / 4));
+                    tickUpper += int24(int256(uint256(trend > 0 ? uint24(trend) : 0) / 2));
                 } else if (trend < -10) {
                     // Downward trend - skew range downward
-                    tickLower += int24(uint24(trend) / 2);
-                    tickUpper += int24(uint24(trend) / 4);
+                    tickLower += int24(int256(trend) / 2);
+                    tickUpper += int24(int256(trend) / 4);
                 }
                 
                 // Align to tick spacing

@@ -4,12 +4,17 @@ pragma solidity ^0.8.24;
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
+import {Currency, CurrencyLibrary} from "v4-core/src/types/Currency.sol";
+import {CurrencySettler} from "uniswap-hooks/utils/CurrencySettler.sol";
 
 /**
  * @title FeesLib
  * @dev Library for fee collection and reinvestment functionality
  */
 library FeesLib {
+    using CurrencyLibrary for Currency;
+    using CurrencySettler for Currency;
+
     /**
      * @dev Collect fees from a position
      * @param poolManager The pool manager contract
@@ -39,10 +44,12 @@ library FeesLib {
         // Process fees - positive deltas represent fees collected
         if (delta.amount0() > 0) {
             feesToken0 = uint256(uint128(delta.amount0()));
+            key.currency0.take(poolManager, address(this), feesToken0, false);
         }
         
         if (delta.amount1() > 0) {
             feesToken1 = uint256(uint128(delta.amount1()));
+            key.currency1.take(poolManager, address(this), feesToken1, false);
         }
         
         return (feesToken0, feesToken1);
@@ -84,7 +91,18 @@ library FeesLib {
         });
         
         // Add the liquidity
-        poolManager.modifyLiquidity(key, params, "");
+        (BalanceDelta delta, ) = poolManager.modifyLiquidity(key, params, "");
+        
+        // Handle token settlement
+        if (delta.amount0() < 0) {
+            // Need to send tokens to pool
+            key.currency0.settle(poolManager, address(this), uint256(uint128(-delta.amount0())), false);
+        }
+        
+        if (delta.amount1() < 0) {
+            // Need to send tokens to pool
+            key.currency1.settle(poolManager, address(this), uint256(uint128(-delta.amount1())), false);
+        }
         
         return liquidityToAdd;
     }

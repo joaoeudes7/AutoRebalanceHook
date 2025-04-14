@@ -20,54 +20,13 @@ library SwapUtils {
     error SlippageLimitExceeded(uint256 amountOut, uint256 minAmountOut);
     
     /**
-     * @dev Calculates the sqrt ratio corresponding to a given tick
+     * @notice Calculates the sqrt ratio corresponding to a given tick
+     * @dev Uses Uniswap's TickMath library for precise calculation
      * @param tick The tick for which to calculate the sqrt ratio
      * @return sqrtPriceX96 The sqrt ratio as a Q64.96 value
      */
     function getSqrtRatioAtTick(int24 tick) internal pure returns (uint160 sqrtPriceX96) {
-        // Ensure tick is within allowed range
-        require(tick >= MIN_TICK && tick <= MAX_TICK, "Tick out of range");
-        
-        // This is a simplified version of Uniswap's TickMath.getSqrtRatioAtTick
-        // For a complete implementation, refer to Uniswap's TickMath library
-        
-        uint256 absTick = tick < 0 ? uint256(-int256(tick)) : uint256(int256(tick));
-        require(absTick <= uint256(int256(MAX_TICK)), "Tick out of range");
-        
-        // We're using a simplified approximation here that is reasonable for most tick ranges
-        // In a production implementation, the full TickMath algorithm would be used
-        
-        // Base price is 1.0001^tick as a Q64.96 fixed-point number
-        // 1.0001^tick = (1 + 0.0001)^tick
-        // ln(1.0001) ≈ 0.0001, so 1.0001^tick ≈ e^(0.0001 * tick)
-        
-        // For positive ticks, price increases
-        // For negative ticks, price decreases
-        
-        if (tick >= 0) {
-            // Simple approximation: 1.0001^tick ≈ 1 + (tick * 0.0001)
-            // Convert to sqrt and to Q64.96
-            // sqrt(1 + (tick * 0.0001)) ≈ 1 + (tick * 0.00005)
-            sqrtPriceX96 = uint160(((1 << 96) * (10000 + (absTick * 5) / 10000)) / 10000);
-        } else {
-            // For negative ticks, we use 1/(1.0001^|tick|)
-            // 1/(1 + (|tick| * 0.0001)) ≈ 1 - (|tick| * 0.0001)
-            // sqrt(1 - (|tick| * 0.0001)) ≈ 1 - (|tick| * 0.00005)
-            uint256 ratio = ((1 << 96) * (10000 - (absTick * 5) / 10000)) / 10000;
-            sqrtPriceX96 = uint160(ratio);
-        }
-        
-        // Ensure the result is within allowed bounds
-        uint160 minSqrtRatio = 4295128739; // MIN_SQRT_RATIO from TickMath
-        uint160 maxSqrtRatio = 1461446703485210103287273052203988822378723970342; // MAX_SQRT_RATIO from TickMath
-        
-        if (sqrtPriceX96 < minSqrtRatio) {
-            sqrtPriceX96 = minSqrtRatio;
-        } else if (sqrtPriceX96 > maxSqrtRatio) {
-            sqrtPriceX96 = maxSqrtRatio;
-        }
-        
-        return sqrtPriceX96;
+        return TickMath.getSqrtPriceAtTick(tick);
     }
 
     /**

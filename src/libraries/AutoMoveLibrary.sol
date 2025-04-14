@@ -12,6 +12,9 @@ import {SwapUtils} from "./SwapUtils.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 import {FixedPoint96} from "v4-core/src/libraries/FixedPoint96.sol";
 import {FullMath} from "v4-core/src/libraries/FullMath.sol";
+import {Currency, CurrencyLibrary} from "v4-core/src/types/Currency.sol";
+import {CurrencySettler} from "uniswap-hooks/utils/CurrencySettler.sol";
+import {LiquidityAmounts} from "v4-periphery/src/libraries/LiquidityAmounts.sol";
 
 /**
  * @title AutoMoveLibrary
@@ -21,6 +24,8 @@ import {FullMath} from "v4-core/src/libraries/FullMath.sol";
 library AutoMoveLibrary {
     using PositionIdLibrary for Position;
     using TickMath for int24;
+    using CurrencyLibrary for Currency;
+    using CurrencySettler for Currency;
 
     // Custom errors
     error InvalidRange();
@@ -122,34 +127,24 @@ library AutoMoveLibrary {
         int24 upperTick,
         uint160 sqrtPriceX96
     ) internal pure returns (uint128 liquidity) {
-        // For simplicity, we'll use a stub implementation until the TickMath issue is resolved
-        uint160 sqrtRatioA = getSimplifiedSqrtRatioAtTick(lowerTick);
-        uint160 sqrtRatioB = getSimplifiedSqrtRatioAtTick(upperTick);
+        uint160 sqrtRatioA = TickMath.getSqrtPriceAtTick(lowerTick);
+        uint160 sqrtRatioB = TickMath.getSqrtPriceAtTick(upperTick);
         
-        // Simplified calculation - production would use LiquidityAmounts.getLiquidityForAmounts
-        // The math here is illustrative; for production use a battle-tested implementation
-        
-        // Limit the current sqrt price to be within the range bounds
-        if (sqrtPriceX96 < sqrtRatioA) {
-            sqrtPriceX96 = sqrtRatioA;
-        } else if (sqrtPriceX96 > sqrtRatioB) {
-            sqrtPriceX96 = sqrtRatioB;
-        }
-        
-        // Converting to 128-bit conservatively to avoid overflows
-        return uint128((amount0 * amount1) / 2**18);
+        return LiquidityAmounts.getLiquidityForAmounts(
+            sqrtPriceX96,
+            sqrtRatioA,
+            sqrtRatioB,
+            amount0,
+            amount1
+        );
     }
     
     /**
      * @dev Simplified implementation of getSqrtRatioAtTick for testing
      */
     function getSimplifiedSqrtRatioAtTick(int24 tick) internal pure returns (uint160) {
-        // Simplified exponential approximation
-        if (tick < 0) {
-            return 4295128739 + uint160(uint24(-tick)); // MIN_SQRT_RATIO + simple offset
-        } else {
-            return 4295128739 + uint160(uint24(tick)) * 1000; // MIN_SQRT_RATIO + simple multiplier
-        }
+        // Use the actual Uniswap V4 implementation
+        return TickMath.getSqrtPriceAtTick(tick);
     }
     
     /**
@@ -397,6 +392,36 @@ library AutoMoveLibrary {
                     result -= 1;
                 }
             }
+        }
+    }
+
+    /**
+     * @dev Handle token transfers according to the balance delta
+     * @param poolManager The pool manager contract
+     * @param key The pool key
+     * @param delta The balance delta
+     */
+    function handleBalanceDelta(
+        IPoolManager poolManager,
+        PoolKey calldata key,
+        BalanceDelta delta
+    ) internal {
+        // Handle token0 delta
+        if (delta.amount0() < 0) {
+            // Need to send tokens to pool
+            key.currency0.settle(poolManager, address(this), uint256(uint128(-delta.amount0())), false);
+        } else if (delta.amount0() > 0) {
+            // Receive tokens from pool
+            key.currency0.take(poolManager, address(this), uint256(uint128(delta.amount0())), false);
+        }
+        
+        // Handle token1 delta
+        if (delta.amount1() < 0) {
+            // Need to send tokens to pool  
+            key.currency1.settle(poolManager, address(this), uint256(uint128(-delta.amount1())), false);
+        } else if (delta.amount1() > 0) {
+            // Receive tokens from pool
+            key.currency1.take(poolManager, address(this), uint256(uint128(delta.amount1())), false);
         }
     }
 } 

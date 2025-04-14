@@ -9,7 +9,7 @@
 	url = https://github.com/uniswap/v4-periphery
 [submodule "lib/uniswap-hooks"]
 	path = lib/uniswap-hooks
-	url = https://github.com/openzeppelin/uniswap-hooks
+	url = https://github.com/OpenZeppelin/uniswap-hooks
 [submodule "lib/solmate"]
 	path = lib/solmate
 	url = https://github.com/transmissions11/solmate

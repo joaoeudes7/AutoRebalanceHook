@@ -156,7 +156,7 @@ library RebalanceLib {
     }
 
     function getCurrentTick(
-        PoolKey calldata key,
+        PoolKey calldata /* key */,
         PositionLib.Position memory position,
         OracleLib.PriceState storage priceState,
         bool useManipulationProtection
@@ -178,8 +178,8 @@ library RebalanceLib {
      * @dev Sets a new range for a position
      */
     function setNewRange(
-        PoolKey calldata key,
-        bytes32 poolId,
+        PoolKey calldata /* key */,
+        bytes32 /* poolId */,
         PositionLib.Position storage position,
         int24 newLowerTick,
         int24 newUpperTick

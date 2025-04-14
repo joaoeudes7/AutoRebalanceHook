@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {BaseHook} from "v4-periphery/src/utils/BaseHook.sol";
+import {BaseHook} from "uniswap-hooks/base/BaseHook.sol";
+import {CurrencySettler} from "uniswap-hooks/utils/CurrencySettler.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {Hooks} from "v4-core/src/libraries/Hooks.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
-import {Currency} from "v4-core/src/types/Currency.sol";
+import {Currency, CurrencyLibrary} from "v4-core/src/types/Currency.sol";
 import {LiquidityAmounts} from "v4-periphery/src/libraries/LiquidityAmounts.sol";
 
 import "./libraries/RebalanceLib.sol";
@@ -27,6 +28,8 @@ import "./libraries/PoolLib.sol";
  */
 abstract contract AutoMoveRangeHookBase is BaseHook {
     using PoolIdLibrary for PoolKey;
+    using CurrencyLibrary for Currency;
+    using CurrencySettler for Currency;
 
     // ========== CUSTOM ERRORS ==========
     error Unauthorized();
@@ -422,7 +425,7 @@ abstract contract AutoMoveRangeHookBase is BaseHook {
         int256 amountSpecified,
         BalanceDelta delta,
         int24 currentTick
-    ) internal {
+    ) internal virtual {
         PoolMetrics storage metrics = poolMetrics[poolId];
         
         // Update last known tick

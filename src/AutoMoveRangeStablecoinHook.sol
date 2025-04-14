@@ -5,6 +5,7 @@ import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 import {IERC20Minimal} from "v4-core/src/interfaces/external/IERC20Minimal.sol";
+import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 
 import "./AutoMoveRangeHookBase.sol";
 import "./libraries/FeesLib.sol";

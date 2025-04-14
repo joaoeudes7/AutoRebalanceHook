@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {Hooks} from "v4-core/src/libraries/Hooks.sol";
-import {BaseHook} from "v4-periphery/src/utils/BaseHook.sol";
+import {BaseHook} from "uniswap-hooks/base/BaseHook.sol";
 
 import "./AutoMoveRangeHookBase.sol";
 import "./AutoMoveRangeStablecoinHook.sol";
